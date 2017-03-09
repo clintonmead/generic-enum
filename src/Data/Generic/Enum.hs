@@ -8,11 +8,11 @@
 {-# LANGUAGE FlexibleInstances #-}
 
 module Data.Generic.Enum (
-  Enum, succ, pred, toEnum, fromEnum, numStepsBetween,
-  DefaultEnum, defaultFromEnum, defaultToEnum,
-  EnumFromTo, enumFromTo, enumFromThenTo, enumFromThenCount, enumFromCount, enumFromStepTo, enumFromStepCount,
-  EnumFrom, enumFrom, enumFromThen, enumFromStep,
-  Element
+  Enum(succ, pred, toEnum, fromEnum, numStepsBetween),
+  DefaultEnum(defaultFromEnum, defaultToEnum),
+  Element,
+  EnumFromTo(enumFromTo, enumFromThenTo, enumFromThenCount, enumFromCount, enumFromStepTo, enumFromStepCount),
+  EnumFrom(enumFrom, enumFromThen, enumFromStep)
   ) where
 
 import qualified Prelude
@@ -52,12 +52,63 @@ The generic 'Enum' class. Firstly, this class just deals with 'fromEnum', 'toEnu
 not the list generating functions like 'Prelude.enumFrom' and 'Prelude.enumFromTo'
 the normal 'Prelude.Enum' has.
 
-This class has a number of defaults for making defining both existing
+This class has a number of defaults for making defining both existing Prelude style Enum classes and
+ordinary Numeric classes quick and painless.
+
+Firstly, for existing Enums:
+
+> instance Enum Blah
+
+Will completely define @Blah@ as an @Enum@ if @Blah@ is already a Prelude style Enum, just forwarding
+calls to the functions in the Prelude's Enum.
+
+Secondly, for integral datatypes (i.e. in class 'Integral')
+
+> instance Enum Blah
+>   type EnumNumT Blah = Blah
+
+will defined @Blah@ to be an Enum, with it's Enum type itself.
+
+For example,
+
+> instance Enum Integer
+>   type EnumNumT Integer = Integer
+
+is an Enum with 'fromEnum' and 'toEnum' simply 'Prelude.id'.
+
+Note that with this approach, @toEnum . fromEnum == id@, instead of going through 'Int'
+and possibly overflowing.
+
+Note also that operations like 'succ' and 'pred' don't bounds check like the Prelude versions often do.
+
+For types that don't fit one of the above two categories (i.e. don't have a satisfactory Prelude Enum
+instance or aren't Integral) you'll have to define the individual functions as discussed with their documentation.
+
+Note that the following function, whilst valid with Prelude style enums, is not valid with the 'Enum' class in this module:
+
+> convertEnum :: (Enum a, Enum b) => a -> b
+> convertEnum = toEnum . fromEnum
+
+because now, Enum's can have different "enum types". That is. 'fromEnum' is not always an 'Int', and 'toEnum' does
+not always take an 'Int'.
+
+Though it is debatable if the above function is sensible though anyway.
+
+I have attempted to define instances of 'Enum' for all types in GHCs included libraries, tell me
+if I've missed any though.
 -}
 class (Num (EnumNumT a), Integral (EnumIntegralT a)) => Enum a where
+  {-|
+  This is the \"enum\" type. It just needs to be in the class 'Num'.
+  -}
   type EnumNumT a
   type EnumNumT a = Int
 
+  {-|
+  'EnumIntegralT' (default - 'EnumNumT'): this is a type that represents the number of \"steps\"
+  between two enums, based on a stepsize. Whilst 'EnumNumT' must only be a 'Num', 'EnumIntegralT'
+  needs to be 'Integral'. If 'EnumNumT' is already 'Integral' it's almost certainly a good choice.
+  -}
   type EnumIntegralT a
   type EnumIntegralT a = EnumNumT a
 
@@ -67,18 +118,39 @@ class (Num (EnumNumT a), Integral (EnumIntegralT a)) => Enum a where
   pred :: a -> a
   pred = toEnum . (subtract 1)  . fromEnum
 
+  {-| Just like Prelude's 'Prelude.toEnum', but with @EnumNumT t@ instead of 'Int' -}
   toEnum :: EnumNumT a -> a
   default toEnum :: (DefaultEnum a (EnumNumT a)) => EnumNumT a -> a
   toEnum = defaultToEnum
 
+  {-| Just like Prelude's 'Prelude.fromEnum', but with @EnumNumT t@ instead of 'Int' -}
   fromEnum :: a -> EnumNumT a
   default fromEnum :: (DefaultEnum a (EnumNumT a)) => a -> EnumNumT a
   fromEnum = defaultFromEnum
 
+  {-|
+  'numStepsBetween': This takes three arguments, firstly, two of type @t@ for some @Enum t@ (\"@start\"@ and \"@end\"@,
+  and also  \"@step@\" of @EnumNumT t@, i.e. the \"enum\" type of @t@.
+
+  The result should be the length of the following list:
+
+  > [start, (start + step) .. end]
+
+  and also of type @EnumIntegralT t@. It should not be less than 0.
+
+  For example:
+
+  > numStepsBetween 'a' 'e' 2
+
+  should be 3.
+  -}
   numStepsBetween :: a -> a -> EnumNumT a -> EnumIntegralT a
   default numStepsBetween :: (e ~ EnumNumT a, e ~ EnumIntegralT a) =>  a -> a -> e -> e
   numStepsBetween x y stepSize = max ((fromEnum y - fromEnum x) `div` stepSize + 1) 0
 
+{-|
+A little trick for defining the two default cases mentioned in the documentation for 'Enum'.
+-}
 class DefaultEnum a b where
   defaultFromEnum :: a -> b
   defaultToEnum :: b -> a
@@ -341,33 +413,80 @@ instance Enum a => Enum (Const a b) where
   fromEnum = fromEnum . getConst
   numStepsBetween (Const x) (Const y) stepSize = numStepsBetween x y stepSize
 
+{-|
+This specifies the type of elements of an instance of a class of either 'EnumFromTo' or 'EnumFrom'.
+
+For example, the definition for lists is:
+
+> type instance Element [a] = a
+-}
 type family Element a
 
+{-|
+The 'EnumFromTo' class defines versions of the Prelude 'Prelude.Enum' functions
+'Prelude.enumFromTo' and 'Prelude.enumFromThenTo', as well as other functions which
+may sometimes be more convienient.
+
+But more importantly, it can produce any structure you define an instance for,
+not just lists.
+
+The only function that needs to be defined is 'enumFromStepCount',
+default definitions will look after the rest.
+
+Note that this class does not deal with the infinite list generating functions,
+you'll need to look at the 'EnumFrom' class for that.
+
+I've attempted to define appropriate instances for any structures in the core GHC
+distribution, currently lists, arrays and bytestrings.
+-}
 class Enum (Element a) => EnumFromTo a where
+  {-| Much like 'Prelude.enumFromTo' from Prelude -}
   enumFromTo :: Element a -> Element a -> a
   enumFromTo x = enumFromStepTo x 1
 
+  {-| Much like 'Prelude.enumFromThenTo' from Prelude -}
   enumFromThenTo :: Element a -> Element a -> Element a -> a
   enumFromThenTo x next_x y = enumFromStepTo x (fromEnum next_x - fromEnum x) y
 
-  enumFromThenCount :: Element a -> Element a -> EnumIntegralT (Element a) -> a
-  enumFromThenCount x next_x = enumFromStepCount x (fromEnum next_x - fromEnum x)
-
+  {-| This is like 'enumFromTo', but instead of a final stopping number, a count is given. -}
   enumFromCount :: Element a -> EnumIntegralT (Element a) -> a
   enumFromCount x = enumFromStepCount x 1
 
+  {-| This is like 'enumFromThenTo', but instead of a final stopping number, a count is given. -}
+  enumFromThenCount :: Element a -> Element a -> EnumIntegralT (Element a) -> a
+  enumFromThenCount x next_x = enumFromStepCount x (fromEnum next_x - fromEnum x)
+
+  {-| This is like 'enumFromThenTo', but instead of giving the second element directly, a step size is passed. -}
   enumFromStepTo :: Element a -> EnumNumT (Element a) -> Element a -> a
   enumFromStepTo x stepSize y = enumFromStepCount x stepSize (numStepsBetween x y stepSize)
 
+  {-|
+  This is a combination of the conviencience changes in 'enumFromThenCount' and 'enumFromStepTo'.
+
+  Instead of having to explicitly state the second element, a \"stepsize\" is passed,
+  Also, instead of stating the last element, a \"count\" is passed.
+
+  I find this tends to be more useful more often.
+  -}
   enumFromStepCount :: Element a -> EnumNumT (Element a) -> EnumIntegralT (Element a) -> a
 
+{-|
+Much like the 'EnumFromTO' class, but defines the \"infinite\" Prelude Enum functions, namely
+'Prelude.enumFrom' and 'Prelude.enumFromThen', as well as 'enumFromStep'.
+
+The only function that needs to be defined is 'enumFromStep',
+default definitions will look after the rest.
+-}
 class Enum (Element a) => EnumFrom a where
+  {-| Much like 'Prelude.enumFrom' from Prelude -}
   enumFrom :: Element a -> a
   enumFrom x = enumFromStep x 1
 
+  {-| Much like 'Prelude.enumFromThen' from Prelude -}
   enumFromThen :: Element a -> Element a -> a
   enumFromThen x next_x = enumFromStep x (fromEnum next_x - fromEnum x)
 
+  {-| Like 'enumFromThen', but with an explicit step size, not just the second element given. -}
   enumFromStep :: Element a -> EnumNumT (Element a) -> a
   default enumFromStep :: (Bounded (EnumIntegralT (Element a)), EnumFromTo a) => Element a -> EnumNumT (Element a) -> a
   enumFromStep x stepSize = enumFromStepCount x stepSize maxBound

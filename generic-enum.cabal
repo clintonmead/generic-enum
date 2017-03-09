@@ -4,8 +4,8 @@ synopsis:             An Enum class that fixes some deficiences with Prelude's E
 description:
   The default Enum class has a couple of issues that limit it's flexibility namely:
   .
-  1) The \"Enum\" type must be always "Int", even when this loses information, such as in
-  the case of "Integer" (due to overflow) and "Rational" (in the case of fractions).
+  1) The \"Enum\" type must be always \"Int\", even when this loses information, such as in
+  the case of \"Integer\" (due to overflow) and \"Rational\" (in the case of fractions).
   .
   2) "enumFromTo" etc like functions can only produce lists, instead of directly producing other
   list like data types. Aside from effeciency, using a list as an intermediary can lose information also.
